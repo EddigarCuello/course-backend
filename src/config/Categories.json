@@ -1,0 +1,52 @@
+[
+  {
+    "nombre": "Inteligencia Artificial",
+    "descripcion": "Machine learning, redes neuronales y automatización",
+    "color": "#8b5cf6"
+  },
+  {
+    "nombre": "Ciberseguridad",
+    "descripcion": "Auditoría de redes, seguridad de infraestructura y hacking ético",
+    "color": "#ef4444"
+  },
+  {
+    "nombre": "Arquitectura Cloud",
+    "descripcion": "Despliegue y servicios en AWS, Azure y Google Cloud",
+    "color": "#0ea5e9"
+  },
+  {
+    "nombre": "Gestión de Proyectos",
+    "descripcion": "Metodologías ágiles, Scrum y liderazgo técnico",
+    "color": "#6366f1"
+  },
+  {
+    "nombre": "Ciencias Básicas",
+    "descripcion": "Matemáticas, física y cálculo para ingeniería",
+    "color": "#84cc16"
+  },
+  {
+    "nombre": "Finanzas",
+    "descripcion": "Educación financiera, contabilidad y evaluación de proyectos",
+    "color": "#eab308"
+  },
+  {
+    "nombre": "Idiomas",
+    "descripcion": "Cursos de inglés técnico y otros idiomas",
+    "color": "#14b8a6"
+  },
+  {
+    "nombre": "Bases de Datos",
+    "descripcion": "Modelado, SQL, NoSQL y optimización de consultas",
+    "color": "#f97316"
+  },
+  {
+    "nombre": "Habilidades Blandas",
+    "descripcion": "Comunicación asertiva, resolución de conflictos y ética",
+    "color": "#f43f5e"
+  },
+  {
+    "nombre": "Fotografía y Video",
+    "descripcion": "Producción audiovisual y edición digital",
+    "color": "#d946ef"
+  }
+]

@@ -1,0 +1,262 @@
+[
+    {
+        "nombre": "María González",
+        "email": "maria.gonzalez@instituto.edu",
+        "telefono": "+57 300 123 4567",
+        "pais": "Colombia",
+        "ciudad": "Barranquilla",
+        "activo": true,
+        "avatarUrl": null,
+        "detallesInstructor": {
+            "especializacion": "Matemáticas",
+            "departamento": "Ciencias Exactas"
+        }
+    },
+    {
+        "nombre": "Carlos Rodríguez",
+        "email": "carlos.rodriguez@instituto.edu",
+        "telefono": "+57 301 234 5678",
+        "pais": "Colombia",
+        "ciudad": "Bogotá",
+        "activo": true,
+        "avatarUrl": null,
+        "detallesInstructor": {
+            "especializacion": "Física",
+            "departamento": "Ciencias Exactas"
+        }
+    },
+    {
+        "nombre": "Ana Martínez",
+        "email": "ana.martinez@instituto.edu",
+        "telefono": "+52 55 1234 5678",
+        "pais": "México",
+        "ciudad": "Ciudad de México",
+        "activo": true,
+        "avatarUrl": null,
+        "detallesInstructor": {
+            "especializacion": "Literatura",
+            "departamento": "Humanidades"
+        }
+    },
+    {
+        "nombre": "Luis Fernández",
+        "email": "luis.fernandez@instituto.edu",
+        "telefono": "+34 612 345 678",
+        "pais": "España",
+        "ciudad": "Madrid",
+        "activo": true,
+        "avatarUrl": null,
+        "detallesInstructor": {
+            "especializacion": "Historia",
+            "departamento": "Humanidades"
+        }
+    },
+    {
+        "nombre": "Laura Sánchez",
+        "email": "laura.sanchez@instituto.edu",
+        "telefono": "+54 11 2345 6789",
+        "pais": "Argentina",
+        "ciudad": "Buenos Aires",
+        "activo": true,
+        "avatarUrl": null,
+        "detallesInstructor": {
+            "especializacion": "Biología",
+            "departamento": "Ciencias Naturales"
+        }
+    },
+    {
+        "nombre": "Jorge Ramírez",
+        "email": "jorge.ramirez@instituto.edu",
+        "telefono": "+57 302 345 6789",
+        "pais": "Colombia",
+        "ciudad": "Medellín",
+        "activo": false,
+        "avatarUrl": null,
+        "detallesInstructor": {
+            "especializacion": "Química",
+            "departamento": "Ciencias Naturales"
+        }
+    },
+    {
+        "nombre": "Patricia Díaz",
+        "email": "patricia.diaz@instituto.edu",
+        "telefono": "+51 987 654 321",
+        "pais": "Perú",
+        "ciudad": "Lima",
+        "activo": true,
+        "avatarUrl": null,
+        "detallesInstructor": {
+            "especializacion": "Inglés",
+            "departamento": "Idiomas"
+        }
+    },
+    {
+        "nombre": "Miguel Torres",
+        "email": "miguel.torres@instituto.edu",
+        "telefono": "+56 9 8765 4321",
+        "pais": "Chile",
+        "ciudad": "Santiago",
+        "activo": true,
+        "avatarUrl": null,
+        "detallesInstructor": {
+            "especializacion": "Educación Física",
+            "departamento": "Deportes"
+        }
+    },
+    {
+        "nombre": "Sofía Herrera",
+        "email": "sofia.herrera@instituto.edu",
+        "telefono": "+593 99 876 5432",
+        "pais": "Ecuador",
+        "ciudad": "Quito",
+        "activo": true,
+        "avatarUrl": null,
+        "detallesInstructor": {
+            "especializacion": "Arte",
+            "departamento": "Humanidades"
+        }
+    },
+    {
+        "nombre": "Diego Morales",
+        "email": "diego.morales@instituto.edu",
+        "telefono": "+58 412 345 6789",
+        "pais": "Venezuela",
+        "ciudad": "Caracas",
+        "activo": true,
+        "avatarUrl": null,
+        "detallesInstructor": {
+            "especializacion": "Programación",
+            "departamento": "Tecnología"
+        }
+    },
+    {
+        "nombre": "Valentina Cruz",
+        "email": "valentina.cruz@instituto.edu",
+        "telefono": "+506 8765 4321",
+        "pais": "Costa Rica",
+        "ciudad": "San José",
+        "activo": true,
+        "avatarUrl": null,
+        "detallesInstructor": {
+            "especializacion": "Química",
+            "departamento": "Ciencias Naturales"
+        }
+    },
+    {
+        "nombre": "Andrés Castro",
+        "email": "andres.castro@instituto.edu",
+        "telefono": "+52 33 4567 8901",
+        "pais": "México",
+        "ciudad": "Guadalajara",
+        "activo": false,
+        "avatarUrl": null,
+        "detallesInstructor": {
+            "especializacion": "Filosofía",
+            "departamento": "Humanidades"
+        }
+    },
+    {
+        "nombre": "Camila Ortiz",
+        "email": "camila.ortiz@instituto.edu",
+        "telefono": "+57 304 567 8901",
+        "pais": "Colombia",
+        "ciudad": "Cali",
+        "activo": true,
+        "avatarUrl": null,
+        "detallesInstructor": {
+            "especializacion": "Diseño Gráfico",
+            "departamento": "Artes"
+        }
+    },
+    {
+        "nombre": "Fernando Ríos",
+        "email": "fernando.rios@instituto.edu",
+        "telefono": "+34 623 456 789",
+        "pais": "España",
+        "ciudad": "Barcelona",
+        "activo": true,
+        "avatarUrl": null,
+        "detallesInstructor": {
+            "especializacion": "Economía",
+            "departamento": "Ciencias Sociales"
+        }
+    },
+    {
+        "nombre": "Isabella Vargas",
+        "email": "isabella.vargas@instituto.edu",
+        "telefono": "+593 98 765 4321",
+        "pais": "Ecuador",
+        "ciudad": "Guayaquil",
+        "activo": true,
+        "avatarUrl": null,
+        "detallesInstructor": {
+            "especializacion": "Psicología",
+            "departamento": "Ciencias Sociales"
+        }
+    },
+    {
+        "nombre": "Roberto Silva",
+        "email": "roberto.silva@instituto.edu",
+        "telefono": "+55 11 9876 5432",
+        "pais": "Brasil",
+        "ciudad": "São Paulo",
+        "activo": true,
+        "avatarUrl": null,
+        "detallesInstructor": {
+            "especializacion": "Geografía",
+            "departamento": "Ciencias Sociales"
+        }
+    },
+    {
+        "nombre": "Gabriela Mendoza",
+        "email": "gabriela.mendoza@instituto.edu",
+        "telefono": "+52 81 3456 7890",
+        "pais": "México",
+        "ciudad": "Monterrey",
+        "activo": true,
+        "avatarUrl": null,
+        "detallesInstructor": {
+            "especializacion": "Robótica",
+            "departamento": "Tecnología"
+        }
+    },
+    {
+        "nombre": "Javier Molina",
+        "email": "javier.molina@instituto.edu",
+        "telefono": "+51 912 345 678",
+        "pais": "Perú",
+        "ciudad": "Arequipa",
+        "activo": false,
+        "avatarUrl": null,
+        "detallesInstructor": {
+            "especializacion": "Música",
+            "departamento": "Artes"
+        }
+    },
+    {
+        "nombre": "Daniela Paredes",
+        "email": "daniela.paredes@instituto.edu",
+        "telefono": "+506 7654 3210",
+        "pais": "Costa Rica",
+        "ciudad": "Alajuela",
+        "activo": true,
+        "avatarUrl": null,
+        "detallesInstructor": {
+            "especializacion": "Estadística",
+            "departamento": "Ciencias Exactas"
+        }
+    },
+    {
+        "nombre": "Tomás Aguilar",
+        "email": "tomas.aguilar@instituto.edu",
+        "telefono": "+54 351 234 5678",
+        "pais": "Argentina",
+        "ciudad": "Córdoba",
+        "activo": true,
+        "avatarUrl": null,
+        "detallesInstructor": {
+            "especializacion": "Redes y Seguridad",
+            "departamento": "Tecnología"
+        }
+    }
+]
