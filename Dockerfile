@@ -16,8 +16,11 @@ COPY . .
 # Crear el directorio uploads si no existe
 RUN mkdir -p uploads
 
-# Exponer el puerto por defecto de la API
-EXPOSE 3000
+# Configurar puerto por defecto
+ENV PORT=8080
+
+# Exponer el puerto por defecto de la API (compatible con TG-Backend)
+EXPOSE 8080
 
 # Comando para iniciar el servidor
 CMD ["npm", "start"]

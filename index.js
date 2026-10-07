@@ -4,7 +4,7 @@ import { connectDB } from './src/config/db.js';
 import { createAdmin } from './src/config/create.admin.js';
 import { seedDatabase } from './src/config/seed.js';
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
 const startServer = async () => {
   //Conectar a MongoDB en Docker

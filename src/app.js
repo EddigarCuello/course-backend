@@ -48,6 +48,11 @@ app.get('/', (req, res) => {
   res.json({ ok: true, message: 'API REST E-commerce Cursos activa' });
 });
 
+// Health checks para AWS Application Load Balancer (ALB) y Target Groups
+app.get(['/health', '/api/health'], (req, res) => {
+  res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
+});
+
 //Manejador de rutas no encontradas (404)
 app.use(notFoundHandler);
 
