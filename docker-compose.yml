@@ -7,16 +7,24 @@ services:
     restart: always
     environment:
       PORT: ${BACKEND_PORT:-8080}
-      MONGO_URI: ${MONGO_URI:-mongodb://admin:ChangeMeStrongPassword@mongodb:27017/course_ecommerce_db?authSource=admin}
-      JWT_SECRET: ${JWT_SECRET:-change_this_secret}
-      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@course.com}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      DATABASE_URL: ${DATABASE_URL:?Define DATABASE_URL}
+      DB_SSL: ${DB_SSL:-false}
+      JWT_SECRET: ${JWT_SECRET:?Define JWT_SECRET}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?Define ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Define ADMIN_PASSWORD}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       CLIENT_URL: ${CLIENT_URL:-http://localhost}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     volumes:
       - uploads_data:/app/uploads
+    networks:
+      - course_app_network
 
 volumes:
   uploads_data:
+
+networks:
+  course_app_network:
+    name: course_app_network
+    external: true

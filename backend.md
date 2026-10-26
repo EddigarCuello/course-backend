@@ -1,112 +1,66 @@
-# Course-Ecommerce (Backend)
+# Backend de Course-Ecommerce
 
-API REST para una plataforma e-commerce de cursos online. Implementada con Node.js, Express, MongoDB y Docker.
+API REST en Node.js y Express con PostgreSQL. La base de datos local usa el mismo esquema relacional previsto para Amazon RDS for PostgreSQL; la alta disponibilidad Multi-AZ se configura en AWS, no en Docker.
 
----
+## Requisitos y configuración
 
-## Tecnologías y Stack
+- Node.js 20 o superior.
+- Docker Desktop y Docker Compose para PostgreSQL local.
+- Actualizar el `.env` local con las variables de `.env.example` y completar `DATABASE_URL`, `JWT_SECRET`, `ADMIN_EMAIL` y `ADMIN_PASSWORD`. Para migrar datos, renombrar la variable anterior `MONGO_URI` como `MONGO_SOURCE_URI`; se usa solo en el importador. No incluir `.env` en imágenes.
+- Para local con backend ejecutado en el host: `DATABASE_URL=postgresql://course_app:<PASSWORD>@localhost:5432/course_ecommerce_db`.
+- Para backend dentro de Docker, utilizar el host de red `postgres` y conectar ambos servicios a `course_app_network`.
 
-- **Runtime:** Node.js (ES Modules - `"type": "module"`)
-- **Framework Web:** Express.js
-- **Base de Datos:** MongoDB 6.0
-- **ODM:** Mongoose
-- **Infraestructura:** Docker y Docker Compose
-- **Pruebas:** Thunder Client (VS Code)
+## Arranque local
 
----
+En PowerShell, desde `course-db`:
 
-## Estructura del Proyecto
-
-```text
-backend/
-├── src/
-│   ├── config/
-│   │   └── db.js                 # Conexión asíncrona a MongoDB con Mongoose
-│   ├── controllers/
-│   │   └── user.controller.js    # Lógica de negocio HTTP y operaciones CRUD
-│   ├── middlewares/
-│   │   └── errorHandler.js       # Manejo centralizado de errores y rutas no encontradas
-│   ├── models/
-│   │   └── user.model.js         # Esquema de Mongoose (User Schema)
-│   ├── routes/
-│   │   └── user.routes.js        # Definición de endpoints mediante Express Router
-│   └── app.js                    # Configuración de Express, middlewares y rutas
-├── .env                          # Variables de entorno
-├── docker-compose.yml            # Orquestación del contenedor de MongoDB
-├── index.js                      # Punto de entrada, conexión a DB e inicio del servidor
-├── package.json                  # Scripts y dependencias del proyecto
-└── README.md                     # Documentación del proyecto
-```
-
----
-
-## Configuración del Entorno y Ejecución
-
-### 1. Variables de Entorno
-
-En la raíz de la carpeta `backend`, crea un archivo `.env`:
-
-```env
-PORT=3000
-MONGO_URI=mongodb://admin:pswrd@localhost:27017/course_ecommerce_db?authSource=admin
-```
-
-### 2. Base de Datos en Docker
-
-Para iniciar el contenedor de MongoDB definido en `docker-compose.yml`:
-
-```bash
+```powershell
+$env:POSTGRES_PASSWORD = "<contraseña-local>"
 docker compose up -d
 ```
 
-### 3. Arranque del Servidor
+Después, desde `course-backend`:
 
-Instalar las dependencias:
-
-```bash
-npm install
-```
-
-Levantar la API en modo desarrollo con Nodemon:
-
-```bash
+```powershell
+npm ci
+npm run db:migrate
+npm run db:seed
+npm run db:create-admin
 npm run dev
 ```
 
----
+`db:migrate` aplica `src/db/schema.sql` de forma idempotente (esquema inicial; todavía no hay versionado de migraciones incrementales); `db:seed` carga datos de demostración, y `db:create-admin` solo crea la cuenta si aún no existe. Ninguno de estos procesos se ejecuta automáticamente al iniciar cada instancia de la API.
 
-## Documentación de Endpoints
+Verificación de disponibilidad y dependencia de datos: `GET /health` o `GET /api/health`. PostgreSQL desconectado produce HTTP 503.
 
-**Base URL:** `http://localhost:3000/api/users`
+## Migrar datos existentes desde MongoDB
 
-| Método | Endpoint | Descripción | Body (JSON) | Respuesta Exitosa |
-|---|---|---|---|---|
-| **GET** | `/` | Listar todos los usuarios | N/A | `200 OK` |
-| **GET** | `/:id` | Obtener un usuario por ID | N/A | `200 OK` |
-| **POST** | `/` | Registrar un nuevo usuario | `{ "nombre": "...", "email": "...", "password": "...", "rol": "..." }` | `201 Created` |
-| **PUT** | `/:id` | Actualizar perfil de usuario | `{ "nombre": "...", "rol": "..." }` | `200 OK` |
-| **DELETE** | `/:id` | Eliminar un usuario | N/A | `204 No Content` |
+Haz una copia de seguridad de MongoDB y prepara una base PostgreSQL vacía. El script conserva los IDs de Mongo para mantener referencias, transforma documentos a tablas relacionales y ejecuta toda la importación en una transacción. MongoDB solo se lee; si falla la importación, PostgreSQL hace rollback.
 
----
+1. Configurar `MONGO_SOURCE_URI` con un usuario de solo lectura y `DATABASE_URL` para PostgreSQL.
+2. Ejecutar `npm run db:migrate`.
+3. Verificar el origen sin escribir: `npm run db:import-mongo -- --dry-run`.
+4. Ejecutar `npm run db:import-mongo` contra el destino vacío.
+5. Comparar conteos y referencias, validar inicio de sesión, cursos, inscripciones, pagos y respaldos antes de dirigir tráfico al destino.
 
-## Arquitectura
+La herramienta rechaza destinos con registros existentes para evitar mezclar datos accidentalmente. No elimina ni modifica MongoDB. Ejecuta la importación completa dentro de una transacción PostgreSQL y verifica los conteos antes del `COMMIT`. Aun así, valida manualmente relaciones, pagos, montos y flujos funcionales; documenta cualquier transformación o dato que requiera reconciliación antes del corte.
 
-El backend utiliza una arquitectura MVC desacoplada:
+La prueba de integración depende de tener PostgreSQL en ejecución. El código y los Compose se validaron; si Docker no está activo, no se ha comprobado el esquema ni la importación en una base real.
 
-```text
-Cliente
-   |
-   v
-Routes
-   |
-   v
-Controllers
-   |
-   v
-Models
-   |
-   v
-MongoDB
-```
+## Scripts
 
-Los middlewares se encargan de funcionalidades transversales como el procesamiento de JSON y el manejo centralizado de errores.
+| Comando | Función |
+|---|---|
+| `npm run dev` | API con recarga de desarrollo |
+| `npm start` | API de producción |
+| `npm test` | Pruebas del backend |
+| `npm run db:migrate` | Crear/actualizar tablas e índices |
+| `npm run db:seed` | Cargar catálogo demostrativo |
+| `npm run db:create-admin` | Crear administrador inicial, sin reemplazar uno existente |
+| `npm run db:import-mongo -- --dry-run` | Revisar conteos antes de importar |
+
+## Esquema
+
+El esquema SQL y sus restricciones están en `src/db/schema.sql`. Las claves primarias de 24 caracteres hexadecimales conservan los ObjectId existentes. Las contraseñas permanecen como hashes bcrypt.
+
+En AWS, usa RDS PostgreSQL Multi-AZ en subredes privadas, TLS con el certificado CA oficial, credenciales gestionadas fuera del repositorio y permisos mínimos. El Compose local es exclusivamente para desarrollo; no representa alta disponibilidad.

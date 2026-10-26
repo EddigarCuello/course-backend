@@ -8,6 +8,7 @@ import teacherRoutes from './routes/teacher.routes.js';
 import categoryRoutes from './routes/category.routes.js';
 import paymentRoutes from './routes/payment.routes.js';
 import { errorHandler,notFoundHandler } from './middlewares/errorHandler.js';
+import { query } from './config/db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -49,8 +50,14 @@ app.get('/', (req, res) => {
 });
 
 // Health checks para AWS Application Load Balancer (ALB) y Target Groups
-app.get(['/health', '/api/health'], (req, res) => {
-  res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
+app.get(['/health', '/api/health'], async (req, res) => {
+  try {
+    await query('SELECT 1');
+    res.status(200).json({ status: 'healthy', database: 'connected', timestamp: new Date().toISOString() });
+  } catch (error) {
+    console.error('Health check falló al consultar PostgreSQL:', error);
+    res.status(503).json({ status: 'unhealthy', database: 'disconnected', timestamp: new Date().toISOString() });
+  }
 });
 
 //Manejador de rutas no encontradas (404)

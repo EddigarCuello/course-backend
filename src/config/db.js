@@ -1,16 +1,29 @@
-import mongoose from 'mongoose';
+import pg from 'pg';
+import fs from 'node:fs';
+
+const { Pool } = pg;
+const sslCaPath = process.env.DB_SSL_CA?.trim();
+const sslCa = sslCaPath ? fs.readFileSync(sslCaPath, 'utf8') : undefined;
+
+if (!process.env.DATABASE_URL) {
+  throw new Error('DATABASE_URL es obligatorio para conectarse a PostgreSQL');
+}
+
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: Number(process.env.DB_POOL_MAX || 10),
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 5_000,
+  ssl: process.env.DB_SSL === 'true'
+    ? { rejectUnauthorized: true, ca: sslCa || undefined }
+    : undefined
+});
 
 export const connectDB = async () => {
-  try {
-
-    const conn = await mongoose.connect(process.env.MONGO_URI);
-    console.log(` MongoDB Conectado: ${conn.connection.host}`);
-
-  } catch (error) {
-
-    console.error(` Error al conectar MongoDB: ${error.message}`);
-    // Detiene la app si la base de datos falla
-    process.exit(1); 
-
-  }
+  await pool.query('SELECT 1');
+  console.log('PostgreSQL conectado');
 };
+
+export const query = (text, values) => pool.query(text, values);
+
+export const closeDB = () => pool.end();

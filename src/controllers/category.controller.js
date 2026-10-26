@@ -1,167 +1,75 @@
-import { CategoryModel } from '../models/category.schema.js';
+import { query } from '../config/db.js';
+import { categorySelect, createId, toError } from '../db/helpers.js';
 
-// GET /api/categories - Obtener todas las categorías
-export const obtenerCategorias = async (req, res, next) => {
+export const obtenerCategorias = async (_req, res, next) => {
   try {
-    const categorias = await CategoryModel.find();
-    res.status(200).json({
-      ok: true,
-      total: categorias.length,
-      data: categorias
-    });
-  } catch (error) {
-    next(error);
-  }
+    const result = await query(`SELECT ${categorySelect} FROM categories ORDER BY nombre`);
+    res.status(200).json({ ok: true, total: result.rowCount, data: result.rows });
+  } catch (error) { next(error); }
 };
 
-// GET /api/categories/:id - Obtener categoría por ID
 export const obtenerCategoriaPorId = async (req, res, next) => {
   try {
-    const { id } = req.params;
-    const categoria = await CategoryModel.findById(id);
-
-    if (!categoria) {
-      const error = new Error('Categoría no encontrada');
-      error.statusCode = 404;
-      return next(error);
-    }
-
-    res.status(200).json({
-      ok: true,
-      data: categoria
-    });
-  } catch (error) {
-    next(error);
-  }
+    const result = await query(`SELECT ${categorySelect} FROM categories WHERE id = $1`, [req.params.id]);
+    if (!result.rowCount) return next(toError('Categoría no encontrada', 404));
+    res.status(200).json({ ok: true, data: result.rows[0] });
+  } catch (error) { next(error); }
 };
 
-// POST /api/categories - Crear nueva categoría
 export const crearCategoria = async (req, res, next) => {
   try {
-    const { nombre, descripcion, icono, color } = req.body;
-
-    if (!nombre) {
-      const error = new Error('El nombre de la categoría es obligatorio');
-      error.statusCode = 400;
-      return next(error);
-    }
-
-    const nuevaCategoria = await CategoryModel.create({
-      nombre,
-      descripcion,
-      icono,
-      color
-    });
-
-    res.status(201).json({
-      ok: true,
-      message: 'Categoría creada con éxito',
-      data: nuevaCategoria
-    });
-  } catch (error) {
-    next(error);
-  }
+    const { nombre, descripcion = '', icono = 'BookOpen', color = '#3b82f6' } = req.body;
+    if (!nombre?.trim()) return next(toError('El nombre de la categoría es obligatorio'));
+    const result = await query(
+      `INSERT INTO categories (id,nombre,descripcion,icono,color) VALUES ($1,$2,$3,$4,$5)
+       RETURNING ${categorySelect}`,
+      [createId(), nombre.trim(), descripcion, icono, color]
+    );
+    res.status(201).json({ ok: true, message: 'Categoría creada con éxito', data: result.rows[0] });
+  } catch (error) { next(error); }
 };
 
-// POST /api/categories/bulk - Carga masiva de categorías
 export const crearCategoriasMasivo = async (req, res, next) => {
   try {
-    const lista = Array.isArray(req.body) ? req.body : (req.body.categorias || req.body.categories || []);
-
-    if (!Array.isArray(lista) || lista.length === 0) {
-      const error = new Error('Se requiere una lista no vacía de categorías');
-      error.statusCode = 400;
-      return next(error);
+    const items = Array.isArray(req.body) ? req.body : (req.body.categorias || req.body.categories || []);
+    if (!items.length) return next(toError('Se requiere una lista no vacía de categorías'));
+    const creadas = [], omitidas = [], errores = [];
+    for (const item of items) {
+      const nombre = String(item.nombre || item.Nombre || item.name || '').trim();
+      if (!nombre) { errores.push({ item, motivo: 'El nombre es obligatorio' }); continue; }
+      const existing = await query('SELECT 1 FROM categories WHERE lower(nombre) = lower($1)', [nombre]);
+      if (existing.rowCount) { omitidas.push({ nombre, motivo: 'La categoría ya existe' }); continue; }
+      const result = await query(
+        `INSERT INTO categories (id,nombre,descripcion,icono,color) VALUES ($1,$2,$3,$4,$5) RETURNING ${categorySelect}`,
+        [createId(), nombre, item.descripcion || item.Descripcion || item.description || '',
+          item.icono || item.Icono || item.icon || 'BookOpen', item.color || item.Color || '#3b82f6']
+      );
+      creadas.push(result.rows[0]);
     }
-
-    const creadas = [];
-    const omitidas = [];
-    const errores = [];
-
-    for (const item of lista) {
-      const nombre = (item.nombre || item.Nombre || item.name || '').toString().trim();
-      const descripcion = (item.descripcion || item.Descripcion || item.description || '').toString().trim();
-      const icono = (item.icono || item.Icono || item.icon || 'BookOpen').toString().trim();
-      const color = (item.color || item.Color || '#3b82f6').toString().trim();
-
-      if (!nombre) {
-        errores.push({ item, motivo: 'El nombre es obligatorio' });
-        continue;
-      }
-
-      const existe = await CategoryModel.findOne({ nombre: { $regex: new RegExp(`^${nombre}$`, 'i') } });
-      if (existe) {
-        omitidas.push({ nombre, motivo: 'La categoría ya existe' });
-        continue;
-      }
-
-      const nueva = await CategoryModel.create({
-        nombre,
-        descripcion,
-        icono,
-        color
-      });
-      creadas.push(nueva);
-    }
-
-    res.status(201).json({
-      ok: true,
-      message: `Procesamiento masivo completado. ${creadas.length} creadas, ${omitidas.length} omitidas, ${errores.length} errores.`,
-      creadas,
-      omitidas,
-      errores
-    });
-  } catch (error) {
-    next(error);
-  }
+    res.status(201).json({ ok: true, message: `Procesamiento masivo completado. ${creadas.length} creadas, ${omitidas.length} omitidas, ${errores.length} errores.`, creadas, omitidas, errores });
+  } catch (error) { next(error); }
 };
 
-// PUT /api/categories/:id - Actualizar categoría
 export const actualizarCategoria = async (req, res, next) => {
   try {
-    const { id } = req.params;
-    const { nombre, descripcion, icono, color } = req.body;
-
-    const categoriaActualizada = await CategoryModel.findByIdAndUpdate(
-      id,
-      { nombre, descripcion, icono, color },
-      { new: true, runValidators: true }
+    const fields = { nombre: 'nombre', descripcion: 'descripcion', icono: 'icono', color: 'color' };
+    const entries = Object.entries(fields).filter(([key]) => req.body[key] !== undefined);
+    if (!entries.length) return next(toError('No hay campos válidos para actualizar'));
+    const values = entries.map(([key]) => req.body[key]);
+    const sets = entries.map(([, column], i) => `${column} = $${i + 2}`);
+    const result = await query(
+      `UPDATE categories SET ${sets.join(', ')}, updated_at = now() WHERE id = $1 RETURNING ${categorySelect}`,
+      [req.params.id, ...values]
     );
-
-    if (!categoriaActualizada) {
-      const error = new Error('Categoría no encontrada');
-      error.statusCode = 404;
-      return next(error);
-    }
-
-    res.status(200).json({
-      ok: true,
-      message: 'Categoría actualizada correctamente',
-      data: categoriaActualizada
-    });
-  } catch (error) {
-    next(error);
-  }
+    if (!result.rowCount) return next(toError('Categoría no encontrada', 404));
+    res.status(200).json({ ok: true, message: 'Categoría actualizada correctamente', data: result.rows[0] });
+  } catch (error) { next(error); }
 };
 
-// DELETE /api/categories/:id - Eliminar categoría
 export const eliminarCategoria = async (req, res, next) => {
   try {
-    const { id } = req.params;
-
-    const categoriaEliminada = await CategoryModel.findByIdAndDelete(id);
-
-    if (!categoriaEliminada) {
-      const error = new Error('Categoría no encontrada');
-      error.statusCode = 404;
-      return next(error);
-    }
-
-    res.status(200).json({
-      ok: true,
-      message: 'Categoría eliminada correctamente'
-    });
-  } catch (error) {
-    next(error);
-  }
+    const result = await query('DELETE FROM categories WHERE id = $1', [req.params.id]);
+    if (!result.rowCount) return next(toError('Categoría no encontrada', 404));
+    res.status(200).json({ ok: true, message: 'Categoría eliminada correctamente' });
+  } catch (error) { next(error); }
 };

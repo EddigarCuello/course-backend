@@ -1,361 +1,265 @@
 import Stripe from 'stripe';
-import { CourseModel } from '../models/course.schema.js';
-import { EnrollmentModel } from '../models/enrollment.schema.js';
-import { PaymentModel } from '../models/payment.schema.js';
+import { pool, query } from '../config/db.js';
+import { createId, enrollmentSelect, isValidId, paymentSelect, toError } from '../db/helpers.js';
 
-const stripeSecretKey = (process.env.STRIPE_SECRET_KEY && process.env.STRIPE_SECRET_KEY.trim())
-  ? process.env.STRIPE_SECRET_KEY.trim()
-  : 'sk_test_dummy_key_placeholder_for_development';
-const stripe = new Stripe(stripeSecretKey);
+const getStripe = () => {
+  if (!process.env.STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY es obligatorio para procesar pagos');
+  return new Stripe(process.env.STRIPE_SECRET_KEY);
+};
 
-const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
+const getClientUrl = () => {
+  if (!process.env.CLIENT_URL) throw new Error('CLIENT_URL es obligatorio para iniciar pagos');
+  return process.env.CLIENT_URL.replace(/\/$/, '');
+};
 
-/**
- * POST /api/payments/create-checkout-session
- * Crea una sesión de Stripe Checkout para un curso.
- * Requiere: { courseId } en el body.
- * Requiere: token JWT (req.user inyectado por authRequired).
- */
+const mapPayment = (payment) => ({
+  _id: payment.id,
+  id: payment.id,
+  inscripcion: payment.inscripcion_id,
+  usuario: payment.usuario_id,
+  stripePaymentId: payment.stripe_payment_id,
+  stripeCustomerId: payment.stripe_customer_id,
+  monto: Number(payment.monto),
+  moneda: payment.moneda,
+  estado: payment.estado,
+  metodoPago: payment.metodo_pago,
+  ultimos4Digitos: payment.ultimos4_digitos,
+  motivoFallo: payment.motivo_fallo,
+  comprobanteUrl: payment.comprobante_url,
+  createdAt: payment.created_at,
+  updatedAt: payment.updated_at
+});
+
+const getPaymentCourse = async (client, courseId) => {
+  const result = await client.query(
+    'SELECT id,titulo,descripcion,precio,capacidad,inscritos FROM courses WHERE id=$1 AND eliminado=false',
+    [courseId]
+  );
+  return result.rows[0];
+};
+
 export const createCheckoutSession = async (req, res, next) => {
   try {
     const { courseId } = req.body;
-
-    if (!courseId) {
-      const error = new Error('courseId es requerido.');
-      error.statusCode = 400;
-      return next(error);
-    }
-
-    // Buscar el curso en la base de datos
-    const course = await CourseModel.findById(courseId);
-    if (!course) {
-      const error = new Error('Curso no encontrado.');
-      error.statusCode = 404;
-      return next(error);
-    }
-
-    const precio = Number(course.precio ?? 0);
-    const titulo = course.titulo || course.title || 'Curso Vacacional';
-
-    // Crear la sesión de Stripe Checkout
+    if (!isValidId(courseId)) return next(toError('courseId no es válido'));
+    const courseResult = await query(
+      'SELECT id,titulo,descripcion,precio FROM courses WHERE id=$1 AND eliminado=false AND activo=true',
+      [courseId]
+    );
+    const course = courseResult.rows[0];
+    if (!course) return next(toError('Curso no encontrado', 404));
+    const stripe = getStripe();
+    const clientUrl = getClientUrl();
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       mode: 'payment',
-      line_items: [
-        {
-          price_data: {
-            currency: 'usd',
-            unit_amount: Math.round(precio * 100), // Stripe usa centavos
-            product_data: {
-              name: titulo,
-              description: course.descripcion?.slice(0, 150) || 'Inscripción al curso vacacional',
-            },
-          },
-          quantity: 1,
+      line_items: [{
+        price_data: {
+          currency: 'usd',
+          unit_amount: Math.round(Number(course.precio) * 100),
+          product_data: { name: course.titulo, description: course.descripcion?.slice(0, 150) || 'Inscripción al curso' }
         },
-      ],
-      // Metadata para poder identificar el pago después
-      metadata: {
-        courseId: courseId.toString(),
-        userId: req.user?.id || req.user?._id || 'guest',
-        userEmail: req.user?.email || '',
-      },
-      customer_email: req.user?.email || undefined,
-      success_url: `${CLIENT_URL}/pagos?session_id={CHECKOUT_SESSION_ID}&status=success`,
-      cancel_url: `${CLIENT_URL}/catalog?status=cancelled`,
+        quantity: 1
+      }],
+      metadata: { courseId, userId: req.user.id, userEmail: req.user.email || '' },
+      customer_email: req.user.email || undefined,
+      success_url: `${clientUrl}/pagos?session_id={CHECKOUT_SESSION_ID}&status=success`,
+      cancel_url: `${clientUrl}/catalog?status=cancelled`
     });
-
     res.status(200).json({ ok: true, url: session.url, sessionId: session.id });
-  } catch (error) {
-    next(error);
-  }
+  } catch (error) { next(error); }
 };
 
-/**
- * POST /api/payments/verify-session
- * Verifica una sesión de Stripe Checkout usando el session_id.
- * Si el pago fue exitoso, registra la inscripción y el pago en la BD.
- * Requiere: { sessionId } en el body.
- * Requiere: token JWT (req.user inyectado por authRequired).
- */
 export const verifyCheckoutSession = async (req, res, next) => {
+  const client = await pool.connect();
+  let paymentKey;
   try {
     const { sessionId } = req.body;
-    const userId = req.user?.id || req.user?._id;
-
-    if (!sessionId) {
-      return res.status(400).json({ error: 'sessionId es requerido.' });
-    }
-
-    // Obtener la sesión de Stripe
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
-
-    if (session.payment_status !== 'paid') {
-      return res.status(400).json({ error: 'El pago no se ha completado en Stripe.' });
-    }
-
+    const userId = req.user.id;
+    if (!sessionId) return res.status(400).json({ error: 'sessionId es requerido.' });
+    const session = await getStripe().checkout.sessions.retrieve(sessionId);
+    if (session.payment_status !== 'paid') return res.status(400).json({ error: 'El pago no se ha completado en Stripe.' });
+    if (session.metadata?.userId !== userId) return res.status(403).json({ error: 'La sesión de pago no pertenece al usuario.' });
     const courseId = session.metadata.courseId;
+    if (!isValidId(courseId)) return next(toError('El curso asociado al pago no es válido'));
 
-    // Comprobar si ya existe el pago en la BD para evitar duplicados
-    const existingPayment = await PaymentModel.findOne({ stripePaymentId: session.payment_intent });
-    if (existingPayment) {
-       return res.status(200).json({ ok: true, message: 'Pago ya registrado', payment: existingPayment });
-    }
+    paymentKey = session.payment_intent || session.id;
+    const existing = await query(`SELECT ${paymentSelect} FROM payments WHERE stripe_payment_id=$1`, [paymentKey]);
+    if (existing.rowCount) return res.status(200).json({ ok: true, message: 'Pago ya registrado', payment: existing.rows[0] });
 
-    // Verificar si ya está inscrito
-    const existingEnrollment = await EnrollmentModel.findOne({ usuario: userId, curso: courseId });
-    let enrollment;
-
-    if (!existingEnrollment) {
-      // 1. Crear Enrollment
-      enrollment = await EnrollmentModel.create({
-        usuario: userId,
-        curso: courseId,
-        estadoPago: 'paid',
-        montoPagado: session.amount_total / 100, // Stripe devuelve en centavos
-        fechaPago: new Date()
-      });
-
-      // 2. Incrementar inscritos del curso
-      await CourseModel.findByIdAndUpdate(courseId, { $inc: { inscritos: 1 } });
-    } else {
-      enrollment = existingEnrollment;
-      // Actualizar si estaba pendiente
-      if (enrollment.estadoPago !== 'paid') {
-         enrollment.estadoPago = 'paid';
-         enrollment.montoPagado = session.amount_total / 100;
-         enrollment.fechaPago = new Date();
-         await enrollment.save();
+    const stripe = getStripe();
+    let paymentMethod = null, last4 = null;
+    if (session.payment_intent) {
+      const intent = await stripe.paymentIntents.retrieve(session.payment_intent);
+      if (intent.payment_method) {
+        const method = await stripe.paymentMethods.retrieve(intent.payment_method);
+        paymentMethod = method.card?.brand || method.type;
+        last4 = method.card?.last4 || null;
       }
     }
 
-    // 3. Obtener Payment Intent para sacar detalles de la tarjeta si aplica
-    let paymentMethod = null;
-    let last4 = null;
-
-    if (session.payment_intent) {
-        const paymentIntent = await stripe.paymentIntents.retrieve(session.payment_intent);
-        if (paymentIntent.payment_method) {
-            const pm = await stripe.paymentMethods.retrieve(paymentIntent.payment_method);
-            paymentMethod = pm.card?.brand || pm.type;
-            last4 = pm.card?.last4;
-        }
-    }
-
-    // 4. Registrar Pago
-    const newPayment = await PaymentModel.create({
-      inscripcion: enrollment._id,
-      usuario: userId,
-      stripePaymentId: session.payment_intent || session.id,
-      stripeCustomerId: session.customer || 'unknown',
-      monto: session.amount_total / 100,
-      moneda: session.currency,
-      estado: 'paid',
-      metodoPago: paymentMethod,
-      ultimos4Digitos: last4
-    });
-
-    // Actualizar enrollment con el ID del pago
-    enrollment.pagoId = newPayment._id;
-    await enrollment.save();
-
-    res.status(200).json({ ok: true, message: 'Pago verificado e inscripción exitosa', payment: newPayment });
+    await client.query('BEGIN');
+    const course = await getPaymentCourse(client, courseId);
+    if (!course) throw toError('Curso no encontrado', 404);
+    const enrollmentResult = await client.query(
+      `INSERT INTO enrollments (id,usuario_id,curso_id,estado_pago,monto_pagado,fecha_pago)
+       VALUES ($1,$2,$3,'paid',$4,now())
+       ON CONFLICT (usuario_id,curso_id) DO UPDATE SET estado_pago='paid',
+         monto_pagado=EXCLUDED.monto_pagado, fecha_pago=now() RETURNING ${enrollmentSelect}`,
+      [createId(), userId, courseId, session.amount_total / 100]
+    );
+    const enrollment = enrollmentResult.rows[0];
+    await client.query('UPDATE courses SET inscritos=(SELECT count(*) FROM enrollments WHERE curso_id=$1), updated_at=now() WHERE id=$1', [courseId]);
+    const paymentResult = await client.query(
+      `INSERT INTO payments (id,inscripcion_id,usuario_id,stripe_payment_id,stripe_customer_id,monto,moneda,estado,metodo_pago,ultimos4_digitos)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'paid',$8,$9) RETURNING ${paymentSelect}`,
+      [createId(), enrollment.id, userId, paymentKey, session.customer || 'unknown',
+        session.amount_total / 100, (session.currency || 'usd').toUpperCase(), paymentMethod, last4]
+    );
+    await client.query('UPDATE enrollments SET pago_id=$1 WHERE id=$2', [paymentResult.rows[0].id, enrollment.id]);
+    await client.query('COMMIT');
+    res.status(200).json({ ok: true, message: 'Pago verificado e inscripción exitosa', payment: paymentResult.rows[0] });
   } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (error.code === '23505') {
+      try {
+        const existing = paymentKey
+          ? await query(`SELECT ${paymentSelect} FROM payments WHERE stripe_payment_id=$1`, [paymentKey])
+          : { rowCount: 0, rows: [] };
+        if (existing.rowCount) return res.status(200).json({ ok: true, message: 'Pago ya registrado', payment: existing.rows[0] });
+      } catch (lookupError) { return next(lookupError); }
+    }
     next(error);
+  } finally {
+    client.release();
   }
 };
 
-/**
- * GET /api/payments/me
- * Obtiene el historial de pagos del usuario autenticado.
- */
 export const getMyPayments = async (req, res, next) => {
   try {
-    const userId = req.user?.id || req.user?._id;
-    const payments = await PaymentModel.find({ usuario: userId })
-      .populate({
-        path: 'inscripcion',
-        populate: {
-          path: 'curso',
-          select: 'titulo title precio diasSemana horaInicio horaFin capacidad inscritos descripcion instructor',
-          populate: { path: 'instructor', select: 'nombre' }
-        }
-      })
-      .sort({ createdAt: -1 });
-
+    const result = await query(
+      `SELECT row_to_json(p) AS payment,
+         json_build_object('_id',e.id,'id',e.id,'estadoPago',e.estado_pago,'montoPagado',e.monto_pagado,
+           'fechaInscripcion',e.fecha_inscripcion,'fechaPago',e.fecha_pago,
+           'curso',json_build_object('_id',c.id,'id',c.id,'titulo',c.titulo,'precio',c.precio,
+             'diasSemana',c.dias_semana,'horaInicio',c.hora_inicio,'horaFin',c.hora_fin,
+             'capacidad',c.capacidad,'inscritos',c.inscritos,'descripcion',c.descripcion,
+             'instructor',json_build_object('_id',t.id,'id',t.id,'nombre',t.nombre))) AS inscripcion
+       FROM payments p JOIN enrollments e ON e.id=p.inscripcion_id
+       JOIN courses c ON c.id=e.curso_id JOIN teachers t ON t.id=c.instructor_id
+       WHERE p.usuario_id=$1 ORDER BY p.created_at DESC`,
+      [req.user.id]
+    );
+    const payments = result.rows.map(({ payment, inscripcion }) => ({
+      ...mapPayment(payment), inscripcion
+    }));
     res.status(200).json({ payments });
-  } catch (error) {
-    next(error);
-  }
+  } catch (error) { next(error); }
 };
 
-/**
- * POST /api/payments/register-cash
- * Registra una inscripción por efectivo/transferencia (queda en estado 'pending').
- * Requiere: { courseId } en el body.
- * Requiere: token JWT (req.user inyectado por authRequired).
- */
 export const registerCashEnrollment = async (req, res, next) => {
+  const client = await pool.connect();
   try {
     const { courseId } = req.body;
-    const userId = req.user?.id || req.user?._id;
-
-    if (!courseId) {
-      return res.status(400).json({ error: 'courseId es requerido.' });
-    }
-
-    const course = await CourseModel.findById(courseId);
+    const userId = req.user.id;
+    if (!isValidId(courseId)) return res.status(400).json({ error: 'courseId es requerido y debe ser válido.' });
+    await client.query('BEGIN');
+    const course = await getPaymentCourse(client, courseId);
     if (!course) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Curso no encontrado.' });
     }
-
-    // Verificar si ya está inscrito
-    const existingEnrollment = await EnrollmentModel.findOne({ usuario: userId, curso: courseId });
-    if (existingEnrollment) {
+    const old = await client.query('SELECT id FROM enrollments WHERE usuario_id=$1 AND curso_id=$2', [userId, courseId]);
+    if (old.rowCount) {
+      await client.query('ROLLBACK');
       return res.status(409).json({ error: 'Ya tienes una inscripción para este curso.' });
     }
-
-    const precio = Number(course.precio ?? 0);
-    const discount = precio * 0.15;
-    const taxes = (precio - discount) * 0.12;
-    const total = precio - discount + taxes;
-
-    // Crear Enrollment en estado pending
-    const enrollment = await EnrollmentModel.create({
-      usuario: userId,
-      curso: courseId,
-      estadoPago: 'pending',
-      montoPagado: total,
-      fechaPago: null
-    });
-
-    // Incrementar inscritos del curso (reservar el cupo)
-    await CourseModel.findByIdAndUpdate(courseId, { $inc: { inscritos: 1 } });
-
-    // Crear registro de pago en estado pending con ID temporal
-    const tempPaymentId = `cash_${userId}_${courseId}_${Date.now()}`;
-    const newPayment = await PaymentModel.create({
-      inscripcion: enrollment._id,
-      usuario: userId,
-      stripePaymentId: tempPaymentId,
-      stripeCustomerId: 'cash-transfer',
-      monto: total,
-      moneda: 'USD',
-      estado: 'pending',
-      metodoPago: 'cash_transfer',
-      ultimos4Digitos: null
-    });
-
-    enrollment.pagoId = newPayment._id;
-    await enrollment.save();
-
-    res.status(201).json({
-      ok: true,
-      message: 'Inscripción registrada. Por favor realiza el pago por efectivo o transferencia.',
-      payment: newPayment,
-      enrollment
-    });
+    const subtotal = Number(course.precio) * 0.85;
+    const total = subtotal * 1.12;
+    const enrollment = (await client.query(
+      `INSERT INTO enrollments (id,usuario_id,curso_id,estado_pago,monto_pagado)
+       VALUES ($1,$2,$3,'pending',$4) RETURNING ${enrollmentSelect}`,
+      [createId(), userId, courseId, total]
+    )).rows[0];
+    await client.query('UPDATE courses SET inscritos=(SELECT count(*) FROM enrollments WHERE curso_id=$1), updated_at=now() WHERE id=$1', [courseId]);
+    const payment = (await client.query(
+      `INSERT INTO payments (id,inscripcion_id,usuario_id,stripe_payment_id,stripe_customer_id,monto,moneda,estado,metodo_pago)
+       VALUES ($1,$2,$3,$4,'cash-transfer',$5,'USD','pending','cash_transfer') RETURNING ${paymentSelect}`,
+      [createId(), enrollment.id, userId, `cash_${userId}_${courseId}_${Date.now()}`, total]
+    )).rows[0];
+    await client.query('UPDATE enrollments SET pago_id=$1 WHERE id=$2', [payment.id, enrollment.id]);
+    await client.query('COMMIT');
+    enrollment.pagoId = payment.id;
+    res.status(201).json({ ok: true, message: 'Inscripción registrada. Por favor realiza el pago por efectivo o transferencia.', payment, enrollment });
   } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
     next(error);
-  }
+  } finally { client.release(); }
 };
 
-/**
- * GET /api/payments/admin/all
- * Obtiene todos los pagos registrados (para el panel de admin).
- */
-export const getAllPayments = async (req, res, next) => {
+export const getAllPayments = async (_req, res, next) => {
   try {
-    const payments = await PaymentModel.find()
-      .populate({
-        path: 'inscripcion',
-        populate: {
-          path: 'curso',
-          select: 'titulo title precio diasSemana horaInicio horaFin capacidad inscritos descripcion instructor',
-          populate: { path: 'instructor', select: 'nombre' }
-        }
-      })
-      .populate({
-        path: 'usuario',
-        select: 'nombre email avatarUrl'
-      })
-      .sort({ createdAt: -1 });
-
+    const result = await query(
+      `SELECT row_to_json(p) AS payment,
+         json_build_object('_id',e.id,'id',e.id,'estadoPago',e.estado_pago,'montoPagado',e.monto_pagado,
+           'fechaInscripcion',e.fecha_inscripcion,'fechaPago',e.fecha_pago,
+           'curso',json_build_object('_id',c.id,'id',c.id,'titulo',c.titulo,'precio',c.precio,
+             'diasSemana',c.dias_semana,'horaInicio',c.hora_inicio,'horaFin',c.hora_fin,
+             'capacidad',c.capacidad,'inscritos',c.inscritos,'descripcion',c.descripcion,
+             'instructor',json_build_object('_id',t.id,'id',t.id,'nombre',t.nombre))) AS inscripcion,
+         json_build_object('_id',u.id,'id',u.id,'nombre',u.nombre,'email',u.email,'avatarUrl',u.avatar_url) AS usuario
+       FROM payments p JOIN enrollments e ON e.id=p.inscripcion_id
+       JOIN courses c ON c.id=e.curso_id JOIN teachers t ON t.id=c.instructor_id
+       JOIN users u ON u.id=p.usuario_id ORDER BY p.created_at DESC`
+    );
+    const payments = result.rows.map(({ payment, inscripcion, usuario }) => ({
+      ...mapPayment(payment), inscripcion, usuario
+    }));
     res.status(200).json({ payments });
-  } catch (error) {
-    next(error);
-  }
+  } catch (error) { next(error); }
 };
 
-/**
- * PUT /api/payments/admin/:paymentId/status
- * Actualiza el estado de un pago (ej. de pending a paid o failed).
- */
 export const updatePaymentStatus = async (req, res, next) => {
+  const client = await pool.connect();
   try {
     const { paymentId } = req.params;
     const { status } = req.body;
-
-    if (!['paid', 'pending', 'failed', 'refunded'].includes(status)) {
-      return res.status(400).json({ error: 'Estado de pago inválido.' });
-    }
-
-    const payment = await PaymentModel.findById(paymentId).populate('inscripcion');
-    if (!payment) {
+    if (!isValidId(paymentId)) return res.status(400).json({ error: 'ID de pago inválido.' });
+    if (!['paid', 'pending', 'failed', 'refunded'].includes(status)) return res.status(400).json({ error: 'Estado de pago inválido.' });
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE payments SET estado=$2,updated_at=now() WHERE id=$1 RETURNING ${paymentSelect}`,
+      [paymentId, status]
+    );
+    if (!result.rowCount) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Pago no encontrado.' });
     }
-
-    payment.estado = status;
-    await payment.save();
-
-    // Sincronizar el estado en la inscripción correspondiente
-    if (payment.inscripcion) {
-      const enrollment = await EnrollmentModel.findById(payment.inscripcion._id);
-      if (enrollment) {
-        enrollment.estadoPago = status;
-        if (status === 'paid' && !enrollment.fechaPago) {
-           enrollment.fechaPago = new Date();
-        }
-        await enrollment.save();
-      }
-    }
-
+    const payment = result.rows[0];
+    await client.query(
+      `UPDATE enrollments SET estado_pago=$2,fecha_pago=CASE WHEN $2='paid' THEN COALESCE(fecha_pago,now()) ELSE fecha_pago END
+       WHERE id=$1`,
+      [payment.inscripcion, status]
+    );
+    await client.query('COMMIT');
     res.status(200).json({ ok: true, message: 'Estado de pago actualizado', payment });
   } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
     next(error);
-  }
+  } finally { client.release(); }
 };
 
-/**
- * POST /api/payments/:paymentId/receipt
- * Sube el comprobante de pago para pagos en efectivo/transferencia.
- */
 export const uploadReceipt = async (req, res, next) => {
   try {
     const { paymentId } = req.params;
-    
-    if (!req.file) {
-      return res.status(400).json({ error: 'No se subió ningún archivo.' });
-    }
-
-    const payment = await PaymentModel.findById(paymentId);
-    if (!payment) {
-      return res.status(404).json({ error: 'Pago no encontrado.' });
-    }
-
-    // Guardar la URL local del archivo
-    // Asumimos que la app se sirve desde el mismo host en desarrollo
+    if (!req.file) return res.status(400).json({ error: 'No se subió ningún archivo.' });
+    if (!isValidId(paymentId)) return res.status(400).json({ error: 'ID de pago inválido.' });
     const fileUrl = `/uploads/${req.file.filename}`;
-    
-    payment.comprobanteUrl = fileUrl;
-    await payment.save();
-
-    res.status(200).json({ 
-      ok: true, 
-      message: 'Comprobante subido correctamente', 
-      comprobanteUrl: fileUrl 
-    });
-  } catch (error) {
-    next(error);
-  }
+    const result = await query(
+      `UPDATE payments SET comprobante_url=$2,updated_at=now() WHERE id=$1 RETURNING id`,
+      [paymentId, fileUrl]
+    );
+    if (!result.rowCount) return res.status(404).json({ error: 'Pago no encontrado.' });
+    res.status(200).json({ ok: true, message: 'Comprobante subido correctamente', comprobanteUrl: fileUrl });
+  } catch (error) { next(error); }
 };

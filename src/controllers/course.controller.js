@@ -1,346 +1,167 @@
-import { CourseModel } from '../models/course.schema.js';
-import { CategoryModel } from '../models/category.schema.js';
-import { UserModel } from '../models/user.schema.js';
-import mongoose from 'mongoose';
+import { query } from '../config/db.js';
+import { courseSelect, createId, isValidId, mapCourse, toError } from '../db/helpers.js';
 
-// GET /api/courses - Obtener todos los cursos no eliminados
-export const obtenerCursos = async (req, res, next) => {
-  try {
-    const cursos = await CourseModel.find({ eliminado: false })
-      .populate('categoria', 'nombre') // Reemplaza ID por datos de la categoría
-      .populate('instructor', 'nombre email avatarUrl'); // Reemplaza ID por datos del instructor
+const courseColumns = [
+  ['titulo', 'titulo'], ['descripcion', 'descripcion'], ['categoria', 'categoria_id'],
+  ['instructor', 'instructor_id'], ['precio', 'precio'], ['capacidad', 'capacidad'],
+  ['fechaInicio', 'fecha_inicio'], ['fechaFin', 'fecha_fin'], ['horaInicio', 'hora_inicio'],
+  ['horaFin', 'hora_fin'], ['diasSemana', 'dias_semana'], ['horario', 'horario'],
+  ['zonaHoraria', 'zona_horaria'], ['ubicacion', 'ubicacion'], ['numeroAula', 'numero_aula'],
+  ['estado', 'estado'], ['publicado', 'publicado'], ['thumbnailUrl', 'thumbnail_url'],
+  ['nivel', 'nivel'], ['maxEstudiantesSesion', 'max_estudiantes_sesion'], ['requisitos', 'requisitos']
+];
 
-    res.status(200).json({
-      ok: true,
-      total: cursos.length,
-      data: cursos
-    });
-  } catch (error) {
-    next(error);
-  }
+const createCourse = async (data) => {
+  const id = createId();
+  const columns = [
+    'id', 'titulo', 'descripcion', 'categoria_id', 'instructor_id', 'precio', 'capacidad',
+    'fecha_inicio', 'fecha_fin', 'hora_inicio', 'hora_fin', 'dias_semana', 'horario',
+    'zona_horaria', 'ubicacion', 'numero_aula', 'estado', 'publicado', 'thumbnail_url',
+    'nivel', 'max_estudiantes_sesion', 'requisitos', 'fecha_publicacion', 'activo', 'eliminado'
+  ];
+  const values = [
+    id, data.titulo, data.descripcion || '', data.categoria, data.instructor,
+    data.precio ?? 0, data.capacidad ?? 20, data.fechaInicio, data.fechaFin,
+    data.horaInicio, data.horaFin, JSON.stringify(data.diasSemana || []), data.horario || '',
+    data.zonaHoraria || 'UTC', data.ubicacion || 'Online', data.numeroAula || null,
+    data.estado || 'draft', data.publicado ?? false, data.thumbnailUrl || null,
+    data.nivel || 'Beginner', data.maxEstudiantesSesion ?? null, data.requisitos || '',
+    data.fechaPublicacion || null, data.activo ?? true, data.eliminado ?? false
+  ];
+  const placeholders = values.map((_, index) => {
+    const number = index + 1;
+    return columns[index] === 'dias_semana' ? `$${number}::jsonb` : `$${number}`;
+  });
+  const result = await query(
+    `INSERT INTO courses (${columns.join(',')}) VALUES (${placeholders.join(',')}) RETURNING id`,
+    values
+  );
+  const selected = await query(`SELECT ${courseSelect} FROM courses c JOIN categories cat ON cat.id=c.categoria_id JOIN teachers t ON t.id=c.instructor_id WHERE c.id=$1`, [result.rows[0].id]);
+  return mapCourse(selected.rows[0]);
 };
 
-// GET /api/courses/activos - Obtener todos los cursos activos
-export const obtenerCursosActivos = async (req, res, next) => {
-  try {
-    const cursos = await CourseModel.find({ activo: true, eliminado: false })
-      .populate('categoria', 'nombre') // Reemplaza ID por datos de la categoría
-      .populate('instructor', 'nombre email avatarUrl'); // Reemplaza ID por datos del instructor
-
-    res.status(200).json({
-      ok: true,
-      total: cursos.length,
-      data: cursos
-    });
-  } catch (error) {
-    next(error);
-  }
+const listCourses = async (where = '', values = []) => {
+  const result = await query(
+    `SELECT ${courseSelect} FROM courses c JOIN categories cat ON cat.id=c.categoria_id JOIN teachers t ON t.id=c.instructor_id ${where} ORDER BY c.created_at DESC`,
+    values
+  );
+  return result.rows.map(mapCourse);
 };
 
+export const obtenerCursos = async (_req, res, next) => {
+  try {
+    const data = await listCourses('WHERE c.eliminado = false');
+    res.status(200).json({ ok: true, total: data.length, data });
+  } catch (error) { next(error); }
+};
 
+export const obtenerCursosActivos = async (_req, res, next) => {
+  try {
+    const data = await listCourses('WHERE c.activo = true AND c.eliminado = false');
+    res.status(200).json({ ok: true, total: data.length, data });
+  } catch (error) { next(error); }
+};
 
-// GET /api/courses/:id - Obtener un curso por ID
 export const obtenerCursoPorId = async (req, res, next) => {
   try {
     const { id } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      const error = new Error('El ID del curso no es válido');
-      error.statusCode = 400;
-      return next(error);
-    }
-
-    const curso = await CourseModel.findOne({ _id: id, eliminado: false })
-      .populate('categoria', 'nombre')
-      .populate('instructor', 'nombre email avatarUrl');
-
-    if (!curso) {
-      const error = new Error('Curso no encontrado');
-      error.statusCode = 404;
-      return next(error);
-    }
-
-    res.status(200).json({
-      ok: true,
-      data: curso
-    });
-  } catch (error) {
-    next(error);
-  }
+    if (!isValidId(id)) return next(toError('El ID del curso no es válido'));
+    const data = await listCourses('WHERE c.id = $1 AND c.eliminado = false', [id]);
+    if (!data.length) return next(toError('Curso no encontrado', 404));
+    res.status(200).json({ ok: true, data: data[0] });
+  } catch (error) { next(error); }
 };
 
-// POST /api/courses - Crear un nuevo curso
 export const crearCurso = async (req, res, next) => {
   try {
-    const {
-      titulo,
-      descripcion,
-      categoria,
-      instructor,
-      precio,
-      capacidad,
-      fechaInicio,
-      fechaFin,
-      horaInicio,
-      horaFin,
-      diasSemana,
-      horario,
-      zonaHoraria,
-      ubicacion,
-      numeroAula,
-      estado,
-      publicado,
-      thumbnailUrl,
-      nivel,
-      maxEstudiantesSesion,
-      requisitos
-    } = req.body;
-
-    // Validar campos requeridos explícitamente en tu Schema
-    if (!titulo || !categoria || !instructor || !fechaInicio || !fechaFin || !horaInicio || !horaFin || !diasSemana) {
-      const error = new Error('Faltan campos obligatorios para registrar el curso');
-      error.statusCode = 400;
-      return next(error);
+    const data = req.body;
+    if (!data.titulo || !data.categoria || !data.instructor || !data.fechaInicio || !data.fechaFin ||
+        !data.horaInicio || !data.horaFin || !Array.isArray(data.diasSemana)) {
+      return next(toError('Faltan campos obligatorios para registrar el curso'));
     }
-
-    const nuevoCurso = await CourseModel.create({
-      titulo,
-      descripcion,
-      categoria,
-      instructor,
-      precio,
-      capacidad,
-      fechaInicio,
-      fechaFin,
-      horaInicio,
-      horaFin,
-      diasSemana,
-      horario,
-      zonaHoraria,
-      ubicacion,
-      numeroAula,
-      estado,
-      publicado,
-      thumbnailUrl,
-      nivel,
-      maxEstudiantesSesion,
-      requisitos,
-      fechaPublicacion: publicado ? new Date() : null
-    });
-
-    res.status(201).json({
-      ok: true,
-      message: 'Curso creado con éxito',
-      data: nuevoCurso
-    });
-  } catch (error) {
-    next(error);
-  }
+    data.fechaPublicacion = data.publicado ? new Date() : null;
+    const created = await createCourse(data);
+    res.status(201).json({ ok: true, message: 'Curso creado con éxito', data: created });
+  } catch (error) { next(error); }
 };
 
-// POST /api/courses/bulk - Carga masiva de cursos
 export const crearCursosMasivo = async (req, res, next) => {
   try {
-    const { teacherModel } = await import('../models/teacher_data.schema.js');
-    const lista = Array.isArray(req.body) ? req.body : (req.body.cursos || req.body.courses || []);
-
-    if (!Array.isArray(lista) || lista.length === 0) {
-      const error = new Error('Se requiere una lista no vacía de cursos');
-      error.statusCode = 400;
-      return next(error);
-    }
-
-    const creados = [];
-    const omitidos = [];
-    const errores = [];
-
-    // Pre-cargar todas las categorías e instructores para agilizar la resolución de nombres
-    const allCategories = await CategoryModel.find();
-    const allTeachers = await teacherModel.find();
-
-    for (const item of lista) {
-      const titulo = (item.titulo || item.Title || item.title || '').toString().trim();
-      const descripcion = (item.descripcion || item.Description || item.description || '').toString().trim();
-      const precio = Number(item.precio ?? item.Price ?? item.price ?? 0);
-      const capacidad = Number(item.capacidad ?? item.Capacity ?? item.capacity ?? 20);
-
-      // Resolver categoría (ID o Nombre)
-      let categoriaId = item.categoria || item.categoriaId || item.category;
-      if (typeof categoriaId === 'object' && categoriaId._id) categoriaId = categoriaId._id;
-      if (!mongoose.Types.ObjectId.isValid(categoriaId)) {
-        const catMatch = allCategories.find(c => c.nombre.toLowerCase() === String(categoriaId || item.categoryName || item.categoriaNombre || '').toLowerCase());
-        categoriaId = catMatch ? catMatch._id : (allCategories[0]?._id || null);
-      }
-
-      // Resolver instructor (ID, Email o Nombre)
-      let instructorId = item.instructor || item.instructorId || item.teacher;
-      if (typeof instructorId === 'object' && instructorId._id) instructorId = instructorId._id;
-      if (!mongoose.Types.ObjectId.isValid(instructorId)) {
-        const instMatch = allTeachers.find(t => t.email.toLowerCase() === String(instructorId || '').toLowerCase() || t.nombre.toLowerCase() === String(instructorId || item.instructorNombre || '').toLowerCase());
-        instructorId = instMatch ? instMatch._id : (allTeachers[0]?._id || null);
-      }
-
-      if (!titulo || !categoriaId || !instructorId) {
+    const items = Array.isArray(req.body) ? req.body : (req.body.cursos || req.body.courses || []);
+    if (!items.length) return next(toError('Se requiere una lista no vacía de cursos'));
+    const categories = (await query('SELECT id,nombre FROM categories')).rows;
+    const teachers = (await query('SELECT id,nombre,email FROM teachers')).rows;
+    const creados = [], omitidos = [], errores = [];
+    for (const item of items) {
+      const titulo = String(item.titulo || item.Title || item.title || '').trim();
+      let category = item.categoria || item.categoriaId || item.category;
+      if (category && typeof category === 'object') category = category._id || category.id;
+      let teacher = item.instructor || item.instructorId || item.teacher;
+      if (teacher && typeof teacher === 'object') teacher = teacher._id || teacher.id;
+      const categoryMatch = categories.find((c) => c.id === category) ||
+        categories.find((c) => c.nombre.toLowerCase() === String(category || item.categoryName || item.categoriaNombre || '').toLowerCase()) ||
+        categories[0];
+      const teacherMatch = teachers.find((t) => t.id === teacher) ||
+        teachers.find((t) => t.email.toLowerCase() === String(teacher || '').toLowerCase() ||
+          t.nombre.toLowerCase() === String(teacher || item.instructorNombre || '').toLowerCase()) || teachers[0];
+      if (!titulo || !categoryMatch || !teacherMatch) {
         errores.push({ item, motivo: 'Faltan campos clave (título, categoría o instructor)' });
         continue;
       }
-
-      let diasSemana = item.diasSemana || item.days;
-      if (typeof diasSemana === 'string') diasSemana = diasSemana.split(',').map(d => d.trim());
-      if (!Array.isArray(diasSemana) || diasSemana.length === 0) diasSemana = ['Lunes'];
-
-      const fechaInicio = item.fechaInicio ? new Date(item.fechaInicio) : new Date();
-      const fechaFin = item.fechaFin ? new Date(item.fechaFin) : new Date(Date.now() + 30 * 86400000);
-      const horaInicio = (item.horaInicio || item.timeStart || '09:00').toString();
-      const horaFin = (item.horaFin || item.timeEnd || '11:00').toString();
+      let days = item.diasSemana || item.days;
+      if (typeof days === 'string') days = days.split(',').map((day) => day.trim());
+      if (!Array.isArray(days) || !days.length) days = ['Lunes'];
       const estado = item.estado || (item.publicado ? 'published' : 'draft');
       const publicado = item.publicado ?? (estado === 'published');
-
-      const nuevoCurso = await CourseModel.create({
-        titulo,
-        descripcion,
-        categoria: categoriaId,
-        instructor: instructorId,
-        precio,
-        capacidad,
-        fechaInicio,
-        fechaFin,
-        horaInicio,
-        horaFin,
-        diasSemana,
-        estado,
-        publicado,
-        fechaPublicacion: publicado ? new Date() : null
-      });
-
-      creados.push(nuevoCurso);
+      creados.push(await createCourse({
+        titulo, descripcion: item.descripcion || item.Description || item.description || '',
+        categoria: categoryMatch.id, instructor: teacherMatch.id,
+        precio: Number(item.precio ?? item.Price ?? item.price ?? 0),
+        capacidad: Number(item.capacidad ?? item.Capacity ?? item.capacity ?? 20),
+        fechaInicio: item.fechaInicio || new Date(),
+        fechaFin: item.fechaFin || new Date(Date.now() + 30 * 86400000),
+        horaInicio: item.horaInicio || item.timeStart || '09:00',
+        horaFin: item.horaFin || item.timeEnd || '11:00',
+        diasSemana: days, estado, publicado, fechaPublicacion: publicado ? new Date() : null
+      }));
     }
-
-    res.status(201).json({
-      ok: true,
-      message: `Procesamiento masivo completado. ${creados.length} creados, ${omitidos.length} omitidos, ${errores.length} errores.`,
-      creados,
-      omitidos,
-      errores
-    });
-  } catch (error) {
-    next(error);
-  }
+    res.status(201).json({ ok: true, message: `Procesamiento masivo completado. ${creados.length} creados, ${omitidos.length} omitidos, ${errores.length} errores.`, creados, omitidos, errores });
+  } catch (error) { next(error); }
 };
 
-// PUT /api/courses/:id - Actualizar un curso
 export const actualizarCurso = async (req, res, next) => {
   try {
     const { id } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      const error = new Error('El ID del curso no es válido');
-      error.statusCode = 400;
-      return next(error);
+    if (!isValidId(id)) return next(toError('El ID del curso no es válido'));
+    const entries = courseColumns.filter(([key]) => req.body[key] !== undefined);
+    if (!entries.length) return next(toError('No hay campos válidos para actualizar'));
+    const values = entries.map(([key]) => req.body[key]);
+    const sets = entries.map(([key, column], index) =>
+      `${column} = $${index + 2}${key === 'diasSemana' ? '::jsonb' : ''}`);
+    if (req.body.publicado !== undefined) {
+      values.push(req.body.publicado ? new Date() : null);
+      sets.push(`fecha_publicacion = $${values.length + 1}`);
     }
-
-    const {
-      titulo,
-      descripcion,
-      categoria,
-      instructor,
-      precio,
-      capacidad,
-      fechaInicio,
-      fechaFin,
-      horaInicio,
-      horaFin,
-      diasSemana,
-      horario,
-      zonaHoraria,
-      ubicacion,
-      numeroAula,
-      estado,
-      publicado,
-      thumbnailUrl,
-      nivel,
-      maxEstudiantesSesion,
-      requisitos
-    } = req.body;
-
-    // Construir objeto dinámico con solo las propiedades enviadas
-    const camposAActualizar = {
-      ...(titulo && { titulo }),
-      ...(descripcion !== undefined && { descripcion }),
-      ...(categoria && { categoria }),
-      ...(instructor && { instructor }),
-      ...(precio !== undefined && { precio }),
-      ...(capacidad !== undefined && { capacidad }),
-      ...(fechaInicio && { fechaInicio }),
-      ...(fechaFin && { fechaFin }),
-      ...(horaInicio && { horaInicio }),
-      ...(horaFin && { horaFin }),
-      ...(diasSemana && { diasSemana }),
-      ...(horario !== undefined && { horario }),
-      ...(zonaHoraria && { zonaHoraria }),
-      ...(ubicacion && { ubicacion }),
-      ...(numeroAula !== undefined && { numeroAula }),
-      ...(estado && { estado }),
-      ...(publicado !== undefined && { 
-        publicado,
-        fechaPublicacion: publicado ? new Date() : null 
-      }),
-      ...(thumbnailUrl !== undefined && { thumbnailUrl }),
-      ...(nivel && { nivel }),
-      ...(maxEstudiantesSesion !== undefined && { maxEstudiantesSesion }),
-      ...(requisitos !== undefined && { requisitos })
-    };
-
-    const cursoActualizado = await CourseModel.findOneAndUpdate(
-      { _id: id, eliminado: false },
-      camposAActualizar,
-      { new: true, runValidators: true }
+    const result = await query(
+      `UPDATE courses SET ${sets.join(', ')}, updated_at=now() WHERE id=$1 AND eliminado=false RETURNING id`,
+      [id, ...values.map((value, index) => entries[index]?.[0] === 'diasSemana' ? JSON.stringify(value) : value)]
     );
-
-    if (!cursoActualizado) {
-      const error = new Error('Curso no encontrado');
-      error.statusCode = 404;
-      return next(error);
-    }
-
-    res.status(200).json({
-      ok: true,
-      message: 'Curso actualizado correctamente',
-      data: cursoActualizado
-    });
-  } catch (error) {
-    next(error);
-  }
+    if (!result.rowCount) return next(toError('Curso no encontrado', 404));
+    const data = (await listCourses('WHERE c.id=$1', [id]))[0];
+    res.status(200).json({ ok: true, message: 'Curso actualizado correctamente', data });
+  } catch (error) { next(error); }
 };
 
-// DELETE /api/courses/:id - Borrado lógico
 export const eliminarCurso = async (req, res, next) => {
   try {
     const { id } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      const error = new Error('El ID del curso no es válido');
-      error.statusCode = 400;
-      return next(error);
-    }
-
-    const cursoEliminado = await CourseModel.findOneAndUpdate(
-      { _id: id, eliminado: false },
-      { eliminado: true, publicado: false, estado: 'draft' },
-      { new: true }
+    if (!isValidId(id)) return next(toError('El ID del curso no es válido'));
+    const result = await query(
+      `UPDATE courses SET eliminado=true, publicado=false, estado='draft', updated_at=now()
+       WHERE id=$1 AND eliminado=false`,
+      [id]
     );
-
-    if (!cursoEliminado) {
-      const error = new Error('Curso no encontrado');
-      error.statusCode = 404;
-      return next(error);
-    }
-
-    res.status(200).json({
-      ok: true,
-      message: 'Curso eliminado correctamente'
-    });
-  } catch (error) {
-    next(error);
-  }
+    if (!result.rowCount) return next(toError('Curso no encontrado', 404));
+    res.status(200).json({ ok: true, message: 'Curso eliminado correctamente' });
+  } catch (error) { next(error); }
 };

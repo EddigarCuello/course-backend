@@ -1,6 +1,13 @@
 export const errorHandler = (err,req,res,next) => {
-    const statusCode = err.statusCode || 500;
-    const message = err.message || 'error interno del servidor';
+    const databaseErrors = {
+        '23505': [409, 'El registro ya existe'],
+        '23503': [400, 'La referencia indicada no existe o está en uso'],
+        '23514': [400, 'Los datos enviados no son válidos'],
+        '22P02': [400, 'Los datos enviados no son válidos']
+    };
+    const [databaseStatus, databaseMessage] = databaseErrors[err.code] || [];
+    const statusCode = err.statusCode || databaseStatus || 500;
+    const message = databaseMessage || err.message || 'error interno del servidor';
 
 
     if (statusCode === 500){
