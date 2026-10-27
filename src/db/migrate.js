@@ -2,11 +2,12 @@ import 'dotenv/config';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { closeDB, query } from '../config/db.js';
+import { closeDB, connectDB, query } from '../config/db.js';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 
 try {
+  await connectDB();
   const schema = await fs.readFile(path.join(directory, 'schema.sql'), 'utf8');
   await query(schema);
   console.log('Esquema PostgreSQL aplicado correctamente');
