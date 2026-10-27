@@ -15,22 +15,25 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// Servir la carpeta uploads como estática
+// Confía en el Application Load Balancer (ALB) para cabeceras X-Forwarded-*
+app.set('trust proxy', 1);
+
+// Servir la carpeta uploads como estática (desarrollo local)
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
-//
+// Logger simple de solicitudes
 app.use((req,res,next) => {
-  console.log(`metodo de la peticion: ${req.method}\nurl de la peticion: ${req.url}`);
+  console.log(`[${req.method}] ${req.url}`);
   next();
 });
 
 //Middlewares globales
 app.use(express.json());
 
-// CORS manual para permitir frontend Prime (sin dependencia extra)
-// En producción restringe origin a tu dominio
+// CORS configurable para producción y desarrollo
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  const allowedOrigin = process.env.CLIENT_URL ? process.env.CLIENT_URL.replace(/\/$/, '') : '*';
+  res.header('Access-Control-Allow-Origin', allowedOrigin);
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.sendStatus(204);

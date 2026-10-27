@@ -1,6 +1,7 @@
 import Stripe from 'stripe';
 import { pool, query } from '../config/db.js';
 import { createId, enrollmentSelect, isValidId, paymentSelect, toError } from '../db/helpers.js';
+import { isS3Configured, uploadFileToS3 } from '../services/s3.service.js';
 
 const getStripe = () => {
   if (!process.env.STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY es obligatorio para procesar pagos');
@@ -254,7 +255,20 @@ export const uploadReceipt = async (req, res, next) => {
     const { paymentId } = req.params;
     if (!req.file) return res.status(400).json({ error: 'No se subió ningún archivo.' });
     if (!isValidId(paymentId)) return res.status(400).json({ error: 'ID de pago inválido.' });
-    const fileUrl = `/uploads/${req.file.filename}`;
+
+    let fileUrl;
+    if (isS3Configured() && req.file.buffer) {
+      const s3Result = await uploadFileToS3({
+        buffer: req.file.buffer,
+        originalname: req.file.originalname,
+        mimetype: req.file.mimetype,
+        folder: 'receipts'
+      });
+      fileUrl = s3Result.url;
+    } else {
+      fileUrl = `/uploads/${req.file.filename}`;
+    }
+
     const result = await query(
       `UPDATE payments SET comprobante_url=$2,updated_at=now() WHERE id=$1 RETURNING id`,
       [paymentId, fileUrl]

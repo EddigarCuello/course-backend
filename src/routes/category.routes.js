@@ -7,18 +7,19 @@ import {
   actualizarCategoria,
   eliminarCategoria
 } from '../controllers/category.controller.js';
+import { authRequired, adminRequired } from '../middlewares/auth.middleware.js';
 
 const router = Router();
 
 router.route('/')
   .get(obtenerCategorias)
-  .post(crearCategoria);
+  .post(authRequired, adminRequired, crearCategoria);
 
-router.post('/bulk', crearCategoriasMasivo);
+router.post('/bulk', authRequired, adminRequired, crearCategoriasMasivo);
 
 router.route('/:id')
   .get(obtenerCategoriaPorId)
-  .put(actualizarCategoria)
-  .delete(eliminarCategoria);
+  .put(authRequired, adminRequired, actualizarCategoria)
+  .delete(authRequired, adminRequired, eliminarCategoria);
 
 export default router;
